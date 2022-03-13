@@ -34,6 +34,7 @@ import ghidra.app.util.cparser.C.ParseException;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionSignature;
+import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryAccessException;
@@ -69,6 +70,8 @@ public class EfiSeek extends EfiUtils {
 	private JSONObject hwSmi = new JSONObject();
 
 	private HashMap<String, Address> smiHandlers = new HashMap<>();
+	private ArrayList<Function> excFunctions = new ArrayList<Function>();
+	private ArrayList<Address> calloutAddresses = new ArrayList<Address>();
 
 	private FuncParamForwarding funcParamForwarding = null;
 	
@@ -598,6 +601,64 @@ public class EfiSeek extends EfiUtils {
 		return guid;
 	}
 	
+	private void findCalloutRec(Function func) throws Exception {
+		for (Instruction inst = getFirstInstruction(func); inst != null && getFunctionContaining(inst.getAddress()) == func; inst = getInstructionAfter(inst)) {
+			PcodeOp pCodeOps[] = inst.getPcode();
+			for (PcodeOp pCode : pCodeOps) {
+				if (pCode.getOpcode() == PcodeOp.CALL) {
+					Address nextFuncAddr = pCode.getInput(0).getAddress();
+					Function nextFunc = getFunctionContaining(nextFuncAddr);
+					if (nextFunc != null && excFunctions.contains(nextFunc)) {
+						// Msg.debug(this, "Found exc function: " + nextFunc.getName());
+						excFunctions.add(nextFunc);
+						findCalloutRec(nextFunc);
+					}
+				}
+			}
+
+			for (PcodeOp pCode : pCodeOps) {
+				if (pCode.getOpcode() == PcodeOp.COPY) {
+					// Msg.debug(this, "Found COPY: " + pCode.toString());
+					Varnode input0 = pCode.getInput(0);
+					Varnode output = pCode.getOutput();
+					if (input0.isAddress()
+					&& funcParamForwarding.getgBSAddresses().contains(input0.getAddress())
+					&& output.isRegister()) {
+						Msg.warn(this, "SMM callout found: " + inst.getAddress().toString());
+						calloutAddresses.add(inst.getAddress());
+					}
+					if (input0.isAddress()
+					&& funcParamForwarding.getgRSAddresses().contains(input0.getAddress())
+					&& output.isRegister()) {
+						Msg.warn(this, "SMM callout found: " + inst.getAddress().toString());
+						calloutAddresses.add(inst.getAddress());
+					}
+				}
+			}
+		}
+	}
+
+	public void findSmmCallout() throws Exception {
+		Msg.info(this, "Searching for SMM callouts");
+
+		Msg.debug(this, "gBSAddresses size: " + funcParamForwarding.getgBSAddresses().size());
+		Msg.debug(this, "gRSAddresses size: " + funcParamForwarding.getgRSAddresses().size());
+		Msg.debug(this, "gSTAddresses size: " + funcParamForwarding.getgSTAddresses().size());
+
+		for (Map.Entry<String, Address> entry : smiHandlers.entrySet()) {
+			Msg.debug(this, "Searching for SMM callouts in '" + entry.getKey() + "'");
+			Function func = getFunctionContaining(entry.getValue());
+			if (func == null) {
+				func = createFunction(entry.getValue(), entry.getKey());
+				if (func == null) {
+					Msg.error(this, "Failed to create function for '" + entry.getKey() + "'");
+					continue;
+				}
+			}
+			findCalloutRec(func);
+		}
+	}
+
 	public void defineUefiFunctions() throws Exception {
 
 		DecompInterface decomp = new DecompInterface();

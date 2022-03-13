@@ -127,6 +127,12 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 			Msg.error(this, "Problems with defining EFI Functions");
 			e.printStackTrace();
 		}
+		try {
+			EfiTool.findSmmCallout();
+		} catch (Exception e) {
+			Msg.error(this, "Problems with finding SMM Callout");
+			e.printStackTrace();
+		}
 		return true;
 	}
 }
