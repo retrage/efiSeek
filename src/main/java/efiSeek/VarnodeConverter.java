@@ -19,7 +19,6 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.Varnode;
-import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.listing.Variable;
@@ -31,7 +30,6 @@ import java.util.HashMap;
 public class VarnodeConverter {
 	private Address addr = null;
 	private Variable finalVar = null;
-	private Long constVar = null;
 	private ArrayList<Long> offset = new ArrayList<Long>();
 	private Boolean deref = false;
 	private HashMap<Variable, Long> mulOffset = new HashMap<Variable, Long>();
@@ -45,7 +43,6 @@ public class VarnodeConverter {
 	public void newVarnode(Varnode inVar) {
 		this.addr = null;
 		this.finalVar = null;
-		this.constVar = null;
 		this.offset = new ArrayList<Long>();
 		this.deref = false;
 		this.mulOffset = new HashMap<Variable, Long>();
@@ -63,7 +60,6 @@ public class VarnodeConverter {
 			this.finalVar = this.findVar(inVar);
 			return;
 		case AddressSpace.TYPE_CONSTANT:
-			this.constVar = inVar.getOffset();
 			return;
 		case AddressSpace.TYPE_RAM:
 			this.addr = this.flatProgramAPI.toAddr(inVar.getOffset());
