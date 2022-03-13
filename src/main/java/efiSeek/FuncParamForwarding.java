@@ -21,6 +21,7 @@ import java.util.Iterator;
 import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.program.flatapi.FlatProgramAPI;
+import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
@@ -46,6 +47,22 @@ public class FuncParamForwarding {
 	private DecompInterface decomp = new DecompInterface();
 	private HashSet<String> functions = new HashSet<String>();
 	private int nameCount = 0;
+
+	private ArrayList<Address> gBSAddresses = new ArrayList<Address>();
+	private ArrayList<Address> gRSAddresses = new ArrayList<Address>();
+	private ArrayList<Address> gSTAddresses = new ArrayList<Address>();
+
+	public ArrayList<Address> getgBSAddresses() {
+		return gBSAddresses;
+	}
+
+	public ArrayList<Address> getgRSAddresses() {
+		return gRSAddresses;
+	}
+
+	public ArrayList<Address> getgSTAddresses() {
+		return gSTAddresses;
+	}
 
 	public FuncParamForwarding(Program prog) throws Exception {
 		this.flatProgramAPI = new FlatProgramAPI(prog);
@@ -222,12 +239,15 @@ public class FuncParamForwarding {
 				switch (var.getHigh().getDataType().getName()) {
 				case "EFI_SYSTEM_TABLE *":
 					name = "gST_" + this.nameCount++;
+					gSTAddresses.add(var.getAddress());
 					break;
 				case "EFI_BOOT_SERVICES *":
 					name = "gBS_" + this.nameCount++;
+					gBSAddresses.add(var.getAddress());
 					break;
 				case "EFI_RUNTIME_SERVICES *":
 					name = "gRS_" + this.nameCount++;
+					gRSAddresses.add(var.getAddress());
 					break;
 				case "EFI_HANDLE":
 					name = "gImageHandle_" + this.nameCount++;
