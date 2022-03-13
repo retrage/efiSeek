@@ -31,6 +31,7 @@ import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.cparser.C.CParser;
 import ghidra.app.util.cparser.C.ParseException;
+import ghidra.program.database.bookmark.BookmarkDBManager;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionSignature;
@@ -656,6 +657,10 @@ public class EfiSeek extends EfiUtils {
 				}
 			}
 			findCalloutRec(func);
+		}
+
+		for (Address addr : calloutAddresses) {
+			setPlateComment(addr, "Potential SMM callout");
 		}
 	}
 
