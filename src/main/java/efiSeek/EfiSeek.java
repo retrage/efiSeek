@@ -68,6 +68,9 @@ public class EfiSeek extends EfiUtils {
 	private JSONObject swSmi = new JSONObject();
 	private JSONObject hwSmi = new JSONObject();
 	
+
+	private FuncParamForwarding funcParamForwarding = null;
+	
 	private HashMap<Function, DecompileResults> decompileFunction = new HashMap<>();
 
 	private String[] uefiFuncList = new String[] { "EFI_LOCATE_PROTOCOL", "EFI_SMM_GET_SMST_LOCATION2",
@@ -740,7 +743,7 @@ public class EfiSeek extends EfiUtils {
 		this.setMain();
 		Function entrtyPoint = this.getFunctionAt(this.getEntryPoint());
 
-		FuncParamForwarding funcParamForwarding = new FuncParamForwarding(this.currentProgram);
+		funcParamForwarding = new FuncParamForwarding(this.currentProgram);
 
 		funcParamForwarding.forward(entrtyPoint, 0);
 		funcParamForwarding.forward(entrtyPoint, 1);
