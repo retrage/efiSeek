@@ -67,7 +67,8 @@ public class EfiSeek extends EfiUtils {
 	private JSONObject childSmi = new JSONObject();
 	private JSONObject swSmi = new JSONObject();
 	private JSONObject hwSmi = new JSONObject();
-	
+
+	private HashMap<String, Address> smiHandlers = new HashMap<>();
 
 	private FuncParamForwarding funcParamForwarding = null;
 	
@@ -361,6 +362,7 @@ public class EfiSeek extends EfiUtils {
 		String funcName = null;
 		String fdefName = null;	
 		Address funcAddress = null;
+		Boolean isSwSmiHandler = false;
 		
 		
 		switch (pCode.getInput(0).getHigh().getDataType().getName()) {
@@ -376,6 +378,7 @@ public class EfiSeek extends EfiUtils {
 			funcName = "swSmiHandler";
 			root = this.swSmi;
 			fdefName = "EFI_SMM_SW_REGISTER2";
+			isSwSmiHandler = true;
 			break;
 		case ("EFI_SMM_PERIODIC_TIMER_REGISTER2"):
 			funcName = "periodicTimerHandler";
@@ -419,6 +422,9 @@ public class EfiSeek extends EfiUtils {
 			funcName = funcName + this.nameCount;
 			this.createFunctionFormDifinition(funcAddress, funcProt, funcName);
 			this.nameCount++;
+			if (isSwSmiHandler) {
+				smiHandlers.put(funcName, funcAddress);
+			}
 		}
 		
 		Address pCodeAddress = pCode.getSeqnum().getTarget();
