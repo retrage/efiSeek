@@ -31,7 +31,6 @@ import ghidra.app.decompiler.DecompInterface;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.util.cparser.C.CParser;
 import ghidra.app.util.cparser.C.ParseException;
-import ghidra.program.database.bookmark.BookmarkDBManager;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionSignature;
@@ -641,10 +640,6 @@ public class EfiSeek extends EfiUtils {
 
 	public void findSmmCallout() throws Exception {
 		Msg.info(this, "Searching for SMM callouts");
-
-		Msg.debug(this, "gBSAddresses size: " + funcParamForwarding.getgBSAddresses().size());
-		Msg.debug(this, "gRSAddresses size: " + funcParamForwarding.getgRSAddresses().size());
-		Msg.debug(this, "gSTAddresses size: " + funcParamForwarding.getgSTAddresses().size());
 
 		for (Map.Entry<String, Address> entry : smiHandlers.entrySet()) {
 			Msg.debug(this, "Searching for SMM callouts in '" + entry.getKey() + "'");
