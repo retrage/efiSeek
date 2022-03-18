@@ -134,6 +134,12 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 			Msg.error(this, "Problems with finding SMM Callout");
 			e.printStackTrace();
 		}
+		try {
+			EfiTool.annotateGetVariableOverflow();
+		} catch (Exception e) {
+			Msg.error(this, "Problems with finding GetVariable Overflow");
+			e.printStackTrace();
+		}
 		return true;
 	}
 }

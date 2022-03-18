@@ -73,12 +73,16 @@ public class EfiSeek extends EfiUtils {
 	private ArrayList<Function> excFunctions = new ArrayList<Function>();
 	private ArrayList<Address> calloutAddresses = new ArrayList<Address>();
 
+	private HashMap<Function, ArrayList<PcodeOp>> getVariableMap = new HashMap<>();
+	private HashMap<PcodeOp, PcodeOp> getVariableOverflows = new HashMap<>();
+
 	private FuncParamForwarding funcParamForwarding = null;
 	
 	private HashMap<Function, DecompileResults> decompileFunction = new HashMap<>();
 
 	private String[] uefiFuncList = new String[] { "EFI_LOCATE_PROTOCOL", "EFI_SMM_GET_SMST_LOCATION2",
-			"EFI_LOCATE_PROTOCOL", "EFI_SMM_REGISTER_PROTOCOL_NOTIFY", "REGISTER", "EFI_INSTALL_PROTOCOL_INTERFACE" };
+			"EFI_LOCATE_PROTOCOL", "EFI_SMM_REGISTER_PROTOCOL_NOTIFY", "REGISTER", "EFI_INSTALL_PROTOCOL_INTERFACE",
+			"EFI_GET_VARIABLE" };
 
 	public EfiSeek(Program prog, String gdtFileName) {
 		this.currentProgram = prog;
@@ -516,6 +520,49 @@ public class EfiSeek extends EfiUtils {
 		}
 
 	}
+
+	private PcodeOp checkGetVariableOverflow(PcodeOp op1, ArrayList<PcodeOp> getVariableList) throws Exception {
+		for (PcodeOp op2 : getVariableList) {
+			if (op2.equals(op1)) {
+				continue;
+			}
+			Varnode op1DataSize = op1.getInput(4);
+			Varnode op2DataSize = op2.getInput(4);
+			// FIXME: This checks if two DataSize Varnode intersects to detect
+			// overflow, but this implementation is too rough. It does not consider
+			// the case that the DataSize is manupulated between two GetVariable calls.
+			if (op1DataSize.intersects(op2DataSize)) {
+				return op2;
+			}
+		}
+		return null;
+	}
+
+	private void regGetVariable(PcodeOpAST op1) throws Exception {
+		if (op1.getNumInputs() != 6) {
+			return;
+		}
+
+		Function func = op1.getInput(0).getHigh().getHighFunction().getFunction();
+		if (func == null) {
+			// This should never happen.
+			return;
+		}
+
+		if (!this.getVariableMap.containsKey(func)) {
+			this.getVariableMap.put(func, new ArrayList<PcodeOp>());
+		}
+		this.getVariableMap.get(func).add(op1);
+
+		PcodeOp op2 = this.checkGetVariableOverflow(op1, this.getVariableMap.get(func));
+		if (op2 != null) {
+			Address op1Addr = op1.getParent().getStart();
+			Address op2Addr = op2.getParent().getStart();
+			Msg.warn(this, "Potential GetVariable overflow detected at "
+			+ func.getName() + " : " + op1Addr.toString() + " and " + op2Addr.toString());
+			this.getVariableOverflows.put(op1, op2);
+		}
+	}
 	
 	private PcodeOpAST checkFuncParams(PcodeOpAST pCode, String fdefName, Integer correctNumberOfParams) throws ParseException {
 		Program program = this.currentProgram;
@@ -659,6 +706,21 @@ public class EfiSeek extends EfiUtils {
 		}
 	}
 
+	public void annotateGetVariableOverflow() throws Exception {
+		Msg.info(this, "Annotating GetVariable overflow");
+
+		int count = 0;
+		for (Map.Entry<PcodeOp, PcodeOp> entry : getVariableOverflows.entrySet()) {
+			PcodeOp op1 = entry.getKey();
+			PcodeOp op2 = entry.getValue();
+			Address op1Addr = op1.getParent().getStart();
+			Address op2Addr = op2.getParent().getStart();
+			setPlateComment(op1Addr, "Potential GetVariable overflow #" + count + ": " + op2Addr.toString());
+			setPlateComment(op2Addr, "Potential GetVariable overflow #" + count + ": " + op1Addr.toString());
+			count += 1;
+		}
+	}
+
 	public void defineUefiFunctions() throws Exception {
 
 		DecompInterface decomp = new DecompInterface();
@@ -748,6 +810,10 @@ public class EfiSeek extends EfiUtils {
 				case ("EFI_SMM_REGISTER_PROTOCOL_NOTIFY"):
 					Msg.info(this, "Registe protocol notify in " + funcName);
 					this.regProtocolNotify(pCode);
+					break;
+				case ("EFI_GET_VARIABLE"):
+					Msg.info(this, "GetVariable in " + funcName);
+					this.regGetVariable(pCode);
 					break;
 				default:
 					break;
