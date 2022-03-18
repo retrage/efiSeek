@@ -67,7 +67,8 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 				ntHeader = NTHeader.createNTHeader(reader, ntHeaderOffset, PortableExecutable.SectionLayout.FILE, false,
 						false);
 			} catch (Exception e) {
-				// ignore
+				Msg.error(this, "Error reading PE header", e);
+				return false;
 			}
 
 			OptionalHeader optionalHeader = ntHeader.getOptionalHeader();
