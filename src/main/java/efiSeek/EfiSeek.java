@@ -42,6 +42,7 @@ import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.pcode.HighFunction;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
+import ghidra.program.model.pcode.SequenceNumber;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.pcode.HighFunctionDBUtil;
 import static ghidra.program.model.data.DataTypeConflictHandler.*;
@@ -73,8 +74,10 @@ public class EfiSeek extends EfiUtils {
 	private ArrayList<Function> excFunctions = new ArrayList<Function>();
 	private ArrayList<Address> calloutAddresses = new ArrayList<Address>();
 
-	private HashMap<Function, ArrayList<PcodeOp>> getVariableMap = new HashMap<>();
-	private HashMap<PcodeOp, PcodeOp> getVariableOverflows = new HashMap<>();
+	// getVariableMap stores function and Pcode CALL op corresponding to GetVariable.
+	private HashMap<HighFunction, ArrayList<PcodeOpAST>> getVariableMap = new HashMap<>();
+	private HashMap<PcodeOpAST, Address> getVariableDataSizeDefAddrMap = new HashMap<>();
+	private HashMap<PcodeOpAST, PcodeOpAST> getVariableOverflows = new HashMap<>();
 
 	private FuncParamForwarding funcParamForwarding = null;
 	
@@ -521,17 +524,132 @@ public class EfiSeek extends EfiUtils {
 
 	}
 
-	private PcodeOp checkGetVariableOverflow(PcodeOp op1, ArrayList<PcodeOp> getVariableList) throws Exception {
-		for (PcodeOp op2 : getVariableList) {
+	private Address getDefAddress(Varnode varnode) {
+		PcodeOp defOp = varnode.getDef();
+		if (defOp == null) {
+			return null;
+		}
+		if (defOp.getOpcode() == PcodeOp.CAST) {
+			// Recursively get the def address of the casted varnode
+			return getDefAddress(defOp.getInput(0));
+		} else if (defOp.getOpcode() == PcodeOp.PTRSUB) {
+			// This def op allocates the actual memory
+			return defOp.getInput(1).getAddress();
+		} else if (defOp.getOpcode() == PcodeOp.COPY) {
+			return defOp.getOutput().getAddress();
+		} else {
+			// TODO: Handle other def opcodes
+			// Msg.info(this, "Unsupported def op: " + defOp.toString());
+		}
+		return null;
+	}
+
+	// Return true if lhsOp and rhsOp are in the same instruction.
+	private Boolean isInSameInstruction(PcodeOpAST lhsOp, PcodeOpAST rhsOp) {
+		if (lhsOp == null || rhsOp == null) {
+			return false;
+		}
+		if (lhsOp.equals(rhsOp)) {
+			return true;
+		}
+		Address lhsOpTarget = lhsOp.getSeqnum().getTarget();
+		Address rhsOpTarget = rhsOp.getSeqnum().getTarget();
+		if (lhsOpTarget.equals(rhsOpTarget)) {
+			return true;
+		}
+		return false;
+	}
+
+	// Return true if the pcode ops between op1 and op2 modify the variable at targetVarDefAddress.
+	private Boolean isVariableModified(HighFunction function, PcodeOpAST op1, PcodeOpAST op2, Address varDefAddress, Boolean checkInputs) {
+		SequenceNumber op1SeqNum = op1.getSeqnum();
+		SequenceNumber op2SeqNum = op2.getSeqnum();
+
+		assert(op1SeqNum.compareTo(op2SeqNum) < 0);
+
+		Iterator<PcodeOpAST> pcodeOps = function.getPcodeOps();
+		// Iterate until op1 is found
+		while (pcodeOps.hasNext()) {
+			PcodeOpAST pOp = pcodeOps.next();
+			if (pOp.equals(op1)) {
+				break;
+			}
+		}
+		if (!pcodeOps.hasNext()) {
+			Msg.error(this, "Target PcodeOpAST is not found in function: " + function.getFunction().getName());
+			return false;
+		}
+		do {
+			PcodeOpAST pOp = pcodeOps.next();
+			if (this.isInSameInstruction(pOp, op1)) {
+				// If pOp is in the part of op1 instruction, continue.
+				continue;
+			}
+			if (this.isInSameInstruction(pOp, op2)) {
+				// If pOp is in the part of op2 instruction, break.
+				break;
+			}
+
+			// Even if the pcode op takes the target variable as input, it doesn't mean it modifies the variable.
+			if (checkInputs) {
+				for (Varnode input : pOp.getInputs()) {
+					Address inputVarDefAddress = getDefAddress(input);
+					if (inputVarDefAddress == null) {
+						continue;
+					}
+					// If input def address is the same as target var def address, they operate on the same variable.
+					if (inputVarDefAddress.getOffset() == varDefAddress.getOffset()) {
+						return true;
+					}
+				}
+			}
+			Varnode output = pOp.getOutput();
+			if (output == null) {
+				continue;
+			}
+			Address outputVarDefAddress = output.getAddress();
+			if (outputVarDefAddress == null) {
+				continue;
+			}
+			// If output def address is the same as target var def address, they operate on the same variable.
+			if (outputVarDefAddress.getOffset() == varDefAddress.getOffset()) {
+				return true;
+			}
+		} while (pcodeOps.hasNext());
+		return false;
+	}
+
+	private PcodeOpAST checkGetVariableOverflow(PcodeOpAST op1, ArrayList<PcodeOpAST> getVariableList, HighFunction function) throws Exception {
+		for (PcodeOpAST op2 : getVariableList) {
 			if (op2.equals(op1)) {
 				continue;
 			}
-			Varnode op1DataSize = op1.getInput(4);
-			Varnode op2DataSize = op2.getInput(4);
-			// FIXME: This checks if two DataSize Varnode intersects to detect
-			// overflow, but this implementation is too rough. It does not consider
-			// the case that the DataSize is manupulated between two GetVariable calls.
-			if (op1DataSize.intersects(op2DataSize)) {
+
+			Address op1DataSizeDefAddr = this.getVariableDataSizeDefAddrMap.get(op1);
+			Address op2DataSizeDefAddr = this.getVariableDataSizeDefAddrMap.get(op2);
+			if (op1DataSizeDefAddr == null || op2DataSizeDefAddr == null) {
+				// This should not happen.
+				continue;
+			}
+
+			if (op1DataSizeDefAddr.equals(op2DataSizeDefAddr)) {
+				// Found potential GetVariable overflow. Check if the DataSize is manupulated.
+				PcodeOpAST startOp = null;
+				PcodeOpAST endOp = null;
+				if (op1.getSeqnum().compareTo(op2.getSeqnum()) < 0) {
+					startOp = op1;
+					endOp = op2;
+				} else {
+					startOp = op2;
+					endOp = op1;
+				}
+
+				Boolean checkInputs = false; // Change to true if you want to check inputs of the pcode ops.
+				if (isVariableModified(function, startOp, endOp, op1DataSizeDefAddr, checkInputs)) {
+					// GetVariable DataSize is manupulated. It may be a correct GetVariable usage.
+					continue;
+				}
+				// GetVariable DataSize is not manupulated. It is a potential overflow.
 				return op2;
 			}
 		}
@@ -543,23 +661,29 @@ public class EfiSeek extends EfiUtils {
 			return;
 		}
 
-		Function func = op1.getInput(0).getHigh().getHighFunction().getFunction();
-		if (func == null) {
+		HighFunction function = op1.getInput(0).getHigh().getHighFunction();
+		if (function == null) {
 			// This should never happen.
 			return;
 		}
 
-		if (!this.getVariableMap.containsKey(func)) {
-			this.getVariableMap.put(func, new ArrayList<PcodeOp>());
+		if (!this.getVariableMap.containsKey(function)) {
+			this.getVariableMap.put(function, new ArrayList<PcodeOpAST>());
 		}
-		this.getVariableMap.get(func).add(op1);
+		this.getVariableMap.get(function).add(op1);
+		// Get GetVariable DataSize def address.
+		Address op1DataSizeDefAddr = this.getDefAddress(op1.getInput(4));
+		if (op1DataSizeDefAddr == null) {
+			return;
+		}
+		this.getVariableDataSizeDefAddrMap.put(op1, op1DataSizeDefAddr);
 
-		PcodeOp op2 = this.checkGetVariableOverflow(op1, this.getVariableMap.get(func));
+		PcodeOpAST op2 = this.checkGetVariableOverflow(op1, this.getVariableMap.get(function), function);
 		if (op2 != null) {
-			Address op1Addr = op1.getParent().getStart();
-			Address op2Addr = op2.getParent().getStart();
+			Address op1Addr = op1.getSeqnum().getTarget();
+			Address op2Addr = op2.getSeqnum().getTarget();
 			Msg.warn(this, "Potential GetVariable overflow detected at "
-			+ func.getName() + " : " + op1Addr.toString() + " and " + op2Addr.toString());
+			+ function.getFunction().getName() + " : " + op1Addr.toString() + " and " + op2Addr.toString());
 			this.getVariableOverflows.put(op1, op2);
 		}
 	}
@@ -710,9 +834,9 @@ public class EfiSeek extends EfiUtils {
 		Msg.info(this, "Annotating GetVariable overflow");
 
 		int count = 0;
-		for (Map.Entry<PcodeOp, PcodeOp> entry : getVariableOverflows.entrySet()) {
-			PcodeOp op1 = entry.getKey();
-			PcodeOp op2 = entry.getValue();
+		for (Map.Entry<PcodeOpAST, PcodeOpAST> entry : getVariableOverflows.entrySet()) {
+			PcodeOpAST op1 = entry.getKey();
+			PcodeOpAST op2 = entry.getValue();
 			Address op1Addr = op1.getParent().getStart();
 			Address op2Addr = op2.getParent().getStart();
 			setPlateComment(op1Addr, "Potential GetVariable overflow #" + count + ": " + op2Addr.toString());
