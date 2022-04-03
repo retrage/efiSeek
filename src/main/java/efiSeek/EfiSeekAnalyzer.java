@@ -100,10 +100,10 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 		monitor.setIndeterminate(true);
 		switch (machine) {
 		case MachineConstants.IMAGE_FILE_MACHINE_AMD64:
-			this.gdtFileName = "Behemotx64.gdt";
+			this.gdtFileName = "efi_x64.gdt";
 			break;
 		case MachineConstants.IMAGE_FILE_MACHINE_I386:
-			this.gdtFileName = "Behemotx32.gdt";
+			this.gdtFileName = "efi_ia32.gdt";
 			break;
 		default:
 			Msg.error(this, "Unknown arch");
