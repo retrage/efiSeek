@@ -1,0 +1,31 @@
+From d6a644921e0d99a62d2f7b024b6fc8db2c7389c8 Mon Sep 17 00:00:00 2001
+From: Akira Moroo <retrage01@gmail.com>
+Date: Sun, 3 Apr 2022 14:27:06 +0900
+Subject: [PATCH] Add workaround for Ghidra C parser
+
+The current Ghidra C parser fails to parse vanilla EDK2 header files due
+to lack of _Static_assert handling as reported in issue [1].
+
+[1] https://github.com/NationalSecurityAgency/ghidra/issues/4038
+
+Signed-off-by: Akira Moroo <retrage01@gmail.com>
+---
+ MdePkg/Include/Base.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/MdePkg/Include/Base.h b/MdePkg/Include/Base.h
+index ce7bdedd34..cd53ce4e0e 100644
+--- a/MdePkg/Include/Base.h
++++ b/MdePkg/Include/Base.h
+@@ -798,7 +798,7 @@ typedef UINTN *BASE_LIST;
+   @param  Message     Raised compiler diagnostic message when expression is false.
+ 
+ **/
+-#ifdef MDE_CPU_EBC
++#if defined (MDE_CPU_EBC) || defined(GHIDRA_CPARSER)
+ #define STATIC_ASSERT(Expression, Message)
+ #elif defined (_MSC_EXTENSIONS)
+ #define STATIC_ASSERT  static_assert
+-- 
+2.35.1
+
