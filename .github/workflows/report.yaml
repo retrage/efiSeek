@@ -28,16 +28,20 @@ jobs:
       uses: gradle/gradle-build-action@v2
       with:
         arguments: --warning-mode all
-    - name: Check dist
-      run: ls dist
     - name: Install efiSeek
       run: |
         DIST_PATH="$(pwd)/dist/ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC_$(date +%Y%m%d)_efiSeek.zip"
         GHIDRA_EXTENSION_DIR="~/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions"
-        echo $DIST_PATH
-        echo $GHIDRA_EXTENSION_DIR
         mkdir -p $GHIDRA_EXTENSION_DIR
         unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
+    - name: Execute headless Ghidra
+      run: |
+        mkdir -p $PROJECT_DIR
+        ${{ env.GHIDRA_INSTALL_DIR }}/support/analyzeHeadless $PROJECT_DIR $PROJECT_NAME -import $IMPORT_PATH -log ${{ env.LOG_PATH }}
+      env:
+        PROJECT_DIR: "example"
+        PROJECT_NAME: "example"
+        IMPORT_PATH: "example/DoubleGetVariable.efi"
     - name: Generate JUnit XML reports
       run: python scripts/gen_report.py ${{ env.LOG_PATH }} ${{ env.REPORT_PATH }}
     - name: Publish JUnit test results
