@@ -683,7 +683,8 @@ public class EfiSeek extends EfiUtils {
 			Address op1Addr = op1.getSeqnum().getTarget();
 			Address op2Addr = op2.getSeqnum().getTarget();
 			Msg.warn(this, "Potential GetVariable overflow detected at "
-			+ function.getFunction().getName() + " : " + op1Addr.toString() + " and " + op2Addr.toString());
+			+ function.getFunction().getName() + "(" + function.getFunction().getEntryPoint().toString() + ")"
+			+ " : " + op1Addr.toString() + " and " + op2Addr.toString());
 			this.getVariableOverflows.put(op1, op2);
 		}
 	}
@@ -789,19 +790,15 @@ public class EfiSeek extends EfiUtils {
 
 			for (PcodeOp pCode : pCodeOps) {
 				if (pCode.getOpcode() == PcodeOp.COPY) {
-					// Msg.debug(this, "Found COPY: " + pCode.toString());
 					Varnode input0 = pCode.getInput(0);
 					Varnode output = pCode.getOutput();
 					if (input0.isAddress()
-					&& funcParamForwarding.getgBSAddresses().contains(input0.getAddress())
+					&& (funcParamForwarding.getgBSAddresses().contains(input0.getAddress())
+						|| funcParamForwarding.getgRSAddresses().contains(input0.getAddress()))
 					&& output.isRegister()) {
-						Msg.warn(this, "SMM callout found: " + inst.getAddress().toString());
-						calloutAddresses.add(inst.getAddress());
-					}
-					if (input0.isAddress()
-					&& funcParamForwarding.getgRSAddresses().contains(input0.getAddress())
-					&& output.isRegister()) {
-						Msg.warn(this, "SMM callout found: " + inst.getAddress().toString());
+						Msg.warn(this, "Potential SMM callout detected at "
+						+ func.getName() + "(" + func.getEntryPoint().toString() + ")"
+						+ " : " + inst.getAddress().toString());
 						calloutAddresses.add(inst.getAddress());
 					}
 				}
