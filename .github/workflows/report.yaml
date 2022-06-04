@@ -30,13 +30,13 @@ jobs:
         arguments: --warning-mode all
     - name: Check dist
       run: ls dist
-    # - name: Install efiSeek
-    #   run: |
-    #     DIST_PATH=$(ls dist/*.zip | tail -1)
-    #     echo $DIST_PATH
-    #     unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
-    #   env:
-    #     GHIDRA_EXTENSION_DIR: ${{ env.HOME }}/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions
+    - name: Install efiSeek
+      run: |
+        DIST_PATH="$(pwd)/dist/ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC_$(date +%Y%m%d)_efiSeek.zip"
+        GHIDRA_EXTENSION_DIR="${{ env.HOME }}/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions"
+        echo $DIST_PATH
+        echo $GHIDRA_EXTENSION_DIR
+        unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
     - name: Generate JUnit XML reports
       run: python scripts/gen_report.py ${{ env.LOG_PATH }} ${{ env.REPORT_PATH }}
     - name: Publish JUnit test results
