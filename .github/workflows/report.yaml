@@ -1,8 +1,9 @@
 on: [push, pull_request]
 
 env:
-  LOG_PATH: example/analysis.log
-  REPORT_PATH: example/analysis.xml
+  GHIDRA_VERSION: "10.1.4"
+  LOG_PATH: "example/analysis.log"
+  REPORT_PATH: "example/analysis.xml"
 
 jobs:
   report:
@@ -18,7 +19,7 @@ jobs:
         cache: "gradle"
     - uses: er28-0652/setup-ghidra@0.0.6
       with:
-        version: "10.1.4"
+        version: ${{ env.GHIDRA_VERSION }}
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -27,6 +28,13 @@ jobs:
       uses: gradle/gradle-build-action@v2
       with:
         arguments: build
+    - name: Install efiSeek
+      run: |
+        DIST_PATH=$(ls dist/*.zip | tail -1)
+        echo $DIST_PATH
+        unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
+      env:
+        GHIDRA_EXTENSION_DIR: ${{ env.HOME }}/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions
     - name: Generate JUnit XML reports
       run: python scripts/gen_report.py ${{ env.LOG_PATH }} ${{ env.REPORT_PATH }}
     - name: Publish JUnit test results
