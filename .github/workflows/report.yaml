@@ -27,14 +27,16 @@ jobs:
     - name: Setup Gradle and Build efiSeek
       uses: gradle/gradle-build-action@v2
       with:
-        arguments: build
-    - name: Install efiSeek
-      run: |
-        DIST_PATH=$(ls dist/*.zip | tail -1)
-        echo $DIST_PATH
-        unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
-      env:
-        GHIDRA_EXTENSION_DIR: ${{ env.HOME }}/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions
+        arguments: --warning-mode all
+    - name: Check dist
+      run: ls dist
+    # - name: Install efiSeek
+    #   run: |
+    #     DIST_PATH=$(ls dist/*.zip | tail -1)
+    #     echo $DIST_PATH
+    #     unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
+    #   env:
+    #     GHIDRA_EXTENSION_DIR: ${{ env.HOME }}/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions
     - name: Generate JUnit XML reports
       run: python scripts/gen_report.py ${{ env.LOG_PATH }} ${{ env.REPORT_PATH }}
     - name: Publish JUnit test results
