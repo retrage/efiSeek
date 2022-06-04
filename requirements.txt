@@ -1,0 +1,4 @@
+certifi==2022.5.18.1
+future==0.18.2
+junitparser==2.6.0
+parse==1.19.0
