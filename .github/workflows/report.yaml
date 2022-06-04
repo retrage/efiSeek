@@ -31,8 +31,7 @@ jobs:
     - name: Install efiSeek
       run: |
         DIST_PATH="$(pwd)/dist/ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC_$(date +%Y%m%d)_efiSeek.zip"
-        GHIDRA_EXTENSION_DIR="~/.ghidra/.ghidra_${{ env.GHIDRA_VERSION }}_PUBLIC/Extensions"
-        mkdir -p $GHIDRA_EXTENSION_DIR
+        GHIDRA_EXTENSION_DIR="${{ env.GHIDRA_INSTALL_DIR }}/Ghidra/Extensions"
         unzip -q -d $GHIDRA_EXTENSION_DIR $DIST_PATH
     - name: Execute headless Ghidra
       run: |
@@ -46,7 +45,7 @@ jobs:
       if: ${{ always() }}
       uses: actions/upload-artifact@v3
       with:
-        name: analysis.log
+        name: Ghidra Analysis Log
         path: ${{ env.LOG_PATH }}
     - name: Generate JUnit XML reports
       run: python scripts/gen_report.py ${{ env.LOG_PATH }} ${{ env.REPORT_PATH }}
