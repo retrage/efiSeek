@@ -42,6 +42,12 @@ jobs:
         PROJECT_DIR: "example"
         PROJECT_NAME: "example"
         IMPORT_PATH: "example/DoubleGetVariable.efi"
+    - name: Upload Ghidra log
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v3
+      with:
+        name: analysis.log
+        path: ${{ env.LOG_PATH }}
     - name: Generate JUnit XML reports
       run: python scripts/gen_report.py ${{ env.LOG_PATH }} ${{ env.REPORT_PATH }}
     - name: Publish JUnit test results
