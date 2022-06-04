@@ -1,4 +1,4 @@
-name: efiSeek Build
+name: Build
 
 on:
   push:
@@ -10,7 +10,7 @@ env:
   GHIDRA_VERSION: "10.1.4"
 
 jobs:
-  report:
+  build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -37,5 +37,6 @@ jobs:
       if: ${{ github.event_name == 'release' }}
       uses: svenstaro/upload-release-action@v2
       with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
         file: dist/*.zip
         file_glob: true
