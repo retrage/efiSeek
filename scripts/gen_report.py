@@ -20,7 +20,6 @@ def create_testcase_from_log(loginfo):
   if module != "EfiSeek":
     return None
   if log_level == "WARN ":
-    print(message.encode("utf-8"))
     result = parse(SMM_GET_VARIABLE_OVERFLOW_LOG_FORMAT, message)
     if result is not None:
       testcase = TestCase(name="Potential SMM GetVariable Overflow : {addr1:#x} and {addr2:#x}".format(addr1=result["addr1"], addr2=result["addr2"]), classname="{func_addr:#x}".format(func_addr=result["func_addr"]))
