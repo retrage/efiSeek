@@ -7,7 +7,7 @@ on:
     types: [published]
 
 env:
-  GHIDRA_VERSION: "10.1.4"
+  GHIDRA_VERSION: "10.2"
 
 jobs:
   build:
@@ -19,7 +19,7 @@ jobs:
     - uses: actions/setup-java@v3
       with:
         distribution: "temurin"
-        java-version: "11.0"
+        java-version: "19.0.1"
         cache: "gradle"
 
     - name: Setup Gradle

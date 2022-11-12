@@ -16,9 +16,8 @@ package efiSeek;
 
 import java.util.ArrayList;
 
-import generic.continues.RethrowContinuesFactory;
+import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.ByteArrayProvider;
-import ghidra.app.util.bin.format.FactoryBundledWithBinaryReader;
 import ghidra.app.util.bin.format.pe.NTHeader;
 import ghidra.app.util.bin.format.pe.PortableExecutable;
 import ghidra.program.flatapi.FlatProgramAPI;
@@ -58,15 +57,14 @@ public abstract class EfiUtils extends FlatProgramAPI {
 				}
 			}
 		}
-		
+
 		boolean primary = true;
-		
+
 		SymbolTable symbolTable = this.getCurrentProgram().getSymbolTable();
 		for (Symbol symbol : symbolTable.getSymbols(address)) {
 			if (symbol.getSource() != SourceType.USER_DEFINED) {
 				symbolTable.removeSymbolSpecial(symbol);
-			}
-			else {
+			} else {
 				primary = false;
 			}
 		}
@@ -81,9 +79,9 @@ public abstract class EfiUtils extends FlatProgramAPI {
 			this.setPlateComment(address, comment);
 		}
 	}
-	
+
 	public final void defineVar(Variable var, DataType dataType, String name) throws Exception {
-		if(var.getSource() != SourceType.USER_DEFINED) {
+		if (var.getSource() != SourceType.USER_DEFINED) {
 			var.setName(name, SourceType.ANALYSIS);
 			var.setDataType(dataType, false, true, SourceType.ANALYSIS);
 		}
@@ -108,12 +106,11 @@ public abstract class EfiUtils extends FlatProgramAPI {
 			}
 			bytesRead += block.getBytes(block.getStart(), blockBytes, bytesRead, (int) block.getSize());
 		}
-		FactoryBundledWithBinaryReader reader = new FactoryBundledWithBinaryReader(
-				RethrowContinuesFactory.INSTANCE, new ByteArrayProvider(blockBytes),
+		BinaryReader reader = new BinaryReader(new ByteArrayProvider(blockBytes),
 				!getCurrentProgram().getLanguage().isBigEndian());
 		int ntHeaderOffset = reader.readInt(0x3C);
-		ntHeader = NTHeader.createNTHeader(reader, ntHeaderOffset,
-		PortableExecutable.SectionLayout.FILE, false, false);
+		ntHeader = new NTHeader(reader, ntHeaderOffset,
+				PortableExecutable.SectionLayout.FILE, false, false);
 
 		long baseEntyPoint = ntHeader.getOptionalHeader().getAddressOfEntryPoint();
 		return getCurrentProgram().getImageBase().add(baseEntyPoint);

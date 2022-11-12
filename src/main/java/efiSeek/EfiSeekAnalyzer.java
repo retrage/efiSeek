@@ -14,9 +14,6 @@
 
 package efiSeek;
 
-
-
-import generic.continues.RethrowContinuesFactory;
 import ghidra.app.services.AbstractAnalyzer;
 import ghidra.app.services.AnalyzerType;
 import ghidra.app.util.importer.MessageLog;
@@ -29,7 +26,7 @@ import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.app.util.bin.ByteArrayProvider;
-import ghidra.app.util.bin.format.FactoryBundledWithBinaryReader;
+import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.format.pe.NTHeader;
 import ghidra.app.util.bin.format.pe.OptionalHeader;
 import ghidra.app.util.bin.format.pe.PortableExecutable;
@@ -69,12 +66,11 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 				}
 				bytesRead += block.getBytes(block.getStart(), blockBytes, bytesRead, (int) block.getSize());
 			}
-			FactoryBundledWithBinaryReader reader = new FactoryBundledWithBinaryReader(
-					RethrowContinuesFactory.INSTANCE, new ByteArrayProvider(blockBytes),
+			BinaryReader reader = new BinaryReader(new ByteArrayProvider(blockBytes),
 					!program.getLanguage().isBigEndian());
 			int ntHeaderOffset = reader.readInt(0x3C);
-			ntHeader = NTHeader.createNTHeader(reader, ntHeaderOffset,
-			PortableExecutable.SectionLayout.FILE, false, false);
+			ntHeader = new NTHeader(reader, ntHeaderOffset,
+					PortableExecutable.SectionLayout.FILE, false, false);
 		} catch (Exception e) {
 			return false;
 		}
@@ -90,7 +86,7 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 
 	@Override
 	public void registerOptions(Options options, Program program) {
-		
+
 	}
 
 	@Override
@@ -99,15 +95,15 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 		short machine = ntHeader.getFileHeader().getMachine();
 		monitor.setIndeterminate(true);
 		switch (machine) {
-		case MachineConstants.IMAGE_FILE_MACHINE_AMD64:
-			this.gdtFileName = "Behemotx64.gdt";
-			break;
-		case MachineConstants.IMAGE_FILE_MACHINE_I386:
-			this.gdtFileName = "Behemotx32.gdt";
-			break;
-		default:
-			Msg.error(this, "Unknown arch");
-			return false;
+			case MachineConstants.IMAGE_FILE_MACHINE_AMD64:
+				this.gdtFileName = "Behemotx64.gdt";
+				break;
+			case MachineConstants.IMAGE_FILE_MACHINE_I386:
+				this.gdtFileName = "Behemotx32.gdt";
+				break;
+			default:
+				Msg.error(this, "Unknown arch");
+				return false;
 		}
 		FlatProgramAPI flatProgramAPI = new FlatProgramAPI(program);
 		if (program.isLocked() == false) {
