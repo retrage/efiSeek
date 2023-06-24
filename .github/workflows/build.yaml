@@ -22,16 +22,15 @@ jobs:
         java-version: "19.0.1"
         cache: "gradle"
 
-    - name: Setup Gradle
-      uses: gradle/gradle-build-action@v2
-
     - uses: er28-0652/setup-ghidra@0.0.6
       with:
         version: ${{ env.GHIDRA_VERSION }}
 
-    - name: Build efiSeek
-      run: |
-        ./gradlew
+    - name: Setup Gradle and build efiSeek
+      uses: gradle/gradle-build-action@v2
+      with:
+        gradle-version: current
+        arguments: buildExtension -PGHIDRA_INSTALL_DIR=${{ env.GHIDRA_INSTALL_DIR }}
   
     - name: Upload release
       if: ${{ github.event_name == 'release' }}
