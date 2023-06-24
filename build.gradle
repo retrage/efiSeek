@@ -37,6 +37,7 @@ repositories {
 }
 
 dependencies {
+    implementation 'org.json:json:20230618'
     runtimeOnly fileTree(dir: ghidraInstallDir + "/Ghidra/patch", include: '**/*.jar')
     runtimeOnly fileTree(dir: ghidraInstallDir + "/Ghidra/Configurations", include: '**/*.jar')
     runtimeOnly fileTree(dir: ghidraInstallDir + "/Ghidra/Features", include: '**/*.jar')
