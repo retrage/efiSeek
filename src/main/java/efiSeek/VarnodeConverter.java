@@ -73,6 +73,9 @@ public class VarnodeConverter {
 		case "CAST":
 			this.cast(pCodeDef);
 			break;
+		case "COPY":
+			this.copy(pCodeDef);
+			break;
 		case "LOAD":
 			this.load(pCodeDef);
 			break;
@@ -141,6 +144,10 @@ public class VarnodeConverter {
 		if (this.checkUnique(pCode)) {
 			return;
 		}
+		this.parsingVarnode(pCode.getInput(0));
+	}
+
+	private void copy(PcodeOp pCode) {
 		this.parsingVarnode(pCode.getInput(0));
 	}
 

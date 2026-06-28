@@ -70,7 +70,7 @@ public class EfiSeekAnalyzer extends AbstractAnalyzer {
 					!program.getLanguage().isBigEndian());
 			int ntHeaderOffset = reader.readInt(0x3C);
 			ntHeader = new NTHeader(reader, ntHeaderOffset,
-					PortableExecutable.SectionLayout.FILE, false, false);
+					PortableExecutable.SectionLayout.FILE, false);
 		} catch (Exception e) {
 			return false;
 		}

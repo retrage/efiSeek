@@ -25,9 +25,7 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.data.FunctionDefinition;
 import ghidra.program.model.data.ParameterDefinition;
-import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Function;
-import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.ParameterImpl;
 import ghidra.program.model.listing.ReturnParameterImpl;
 import ghidra.program.model.listing.Variable;
@@ -45,17 +43,9 @@ import ghidra.util.exception.InvalidInputException;
 public abstract class EfiUtils extends FlatProgramAPI {
 
 	public final void defineData(Address address, DataType dataType, String name, String comment) throws Exception {
-		for (int i = 0; i < dataType.getLength(); i++) {
-			Address currentAddress = address.add(i);
-			Data existingData = this.getDataAt(currentAddress);
-			if (existingData != null) {
-				this.removeData(existingData);
-			} else {
-				Instruction existingInstruction = this.getInstructionAt(currentAddress);
-				if (existingInstruction != null) {
-					this.removeInstruction(existingInstruction);
-				}
-			}
+		int length = dataType.getLength();
+		if (length > 0) {
+			this.getCurrentProgram().getListing().clearCodeUnits(address, address.add(length - 1), false);
 		}
 
 		boolean primary = true;
@@ -110,7 +100,7 @@ public abstract class EfiUtils extends FlatProgramAPI {
 				!getCurrentProgram().getLanguage().isBigEndian());
 		int ntHeaderOffset = reader.readInt(0x3C);
 		ntHeader = new NTHeader(reader, ntHeaderOffset,
-				PortableExecutable.SectionLayout.FILE, false, false);
+				PortableExecutable.SectionLayout.FILE, false);
 
 		long baseEntyPoint = ntHeader.getOptionalHeader().getAddressOfEntryPoint();
 		return getCurrentProgram().getImageBase().add(baseEntyPoint);
