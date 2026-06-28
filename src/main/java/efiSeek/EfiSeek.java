@@ -80,6 +80,22 @@ public class EfiSeek extends EfiUtils {
 	private LinkedHashSet<Address> smstAddresses = new LinkedHashSet<Address>();
 	private boolean hasSmmEvidence = false;
 
+	private enum LocateProtocolOrigin {
+		BOOT_SERVICES("BOOT_SERVICES_LOCATE_PROTOCOL"),
+		SMM("SMM_LOCATE_PROTOCOL"),
+		UNKNOWN("UNKNOWN_LOCATE_PROTOCOL");
+
+		private final String label;
+
+		private LocateProtocolOrigin(String label) {
+			this.label = label;
+		}
+
+		private String getLabel() {
+			return label;
+		}
+	}
+
 	private static class CalloutRoot {
 		private final String kind;
 		private final String name;
@@ -293,21 +309,42 @@ public class EfiSeek extends EfiUtils {
 	}
 
 	private boolean isSmstDerivedCallTarget(Varnode varnode) {
+		return isTableDerivedCallTarget(varnode, this.smstAddresses);
+	}
+
+	private boolean isBootServicesDerivedCallTarget(Varnode varnode) {
+		if (this.funcParamForwarding == null) {
+			return false;
+		}
+		return isTableDerivedCallTarget(varnode, this.funcParamForwarding.getgBSAddresses());
+	}
+
+	private boolean isTableDerivedCallTarget(Varnode varnode, Collection<Address> tableAddresses) {
 		this.varnodeConverter.newVarnode(varnode);
 		if (!this.varnodeConverter.isGlobal()) {
 			return false;
 		}
 		Address address = this.varnodeConverter.getGlobalAddress();
-		if (this.smstAddresses.contains(address)) {
+		if (tableAddresses.contains(address)) {
 			return true;
 		}
-		for (Address smstAddress : this.smstAddresses) {
-			long offset = address.subtract(smstAddress);
+		for (Address tableAddress : tableAddresses) {
+			long offset = address.subtract(tableAddress);
 			if (offset >= 0 && offset < 0x200) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	private LocateProtocolOrigin getLocateProtocolOrigin(PcodeOpAST pCode) {
+		if (isSmstDerivedCallTarget(pCode.getInput(0))) {
+			return LocateProtocolOrigin.SMM;
+		}
+		if (isBootServicesDerivedCallTarget(pCode.getInput(0))) {
+			return LocateProtocolOrigin.BOOT_SERVICES;
+		}
+		return LocateProtocolOrigin.UNKNOWN;
 	}
 
 	private void addCalloutRoot(String kind, String name, Address address, Address sourceAddress) {
@@ -433,6 +470,7 @@ public class EfiSeek extends EfiUtils {
 		if(pCode == null) {
 			return;
 		}
+		LocateProtocolOrigin origin = getLocateProtocolOrigin(pCode);
 		
 		Guid guid = null;
 		guid = this.defineGuid(pCode.getInput(1));
@@ -463,7 +501,7 @@ public class EfiSeek extends EfiUtils {
 			protocolAddress = varnodeConverter.getGlobalAddress();
 			this.defineData(protocolAddress, interfaceType, "g" + interfaceName + "_" + this.nameCount,
 					null);
-			if (isPotentialCalloutProtocol(interfaceName)) {
+			if (origin == LocateProtocolOrigin.BOOT_SERVICES && isPotentialCalloutProtocol(interfaceName)) {
 				this.protocolCalloutAddresses.add(protocolAddress);
 			}
 			this.nameCount++;
@@ -478,6 +516,10 @@ public class EfiSeek extends EfiUtils {
 		protocol.put("name", interfaceName);
 		protocol.put("function name", this.getFunctionBefore(pCodeAddress).getName());
 		protocol.put("guid", guid.toString());
+		protocol.put("origin", origin.getLabel());
+		if (protocolAddress != null && mem.contains(protocolAddress)) {
+			protocol.put("interface offset", String.valueOf(protocolAddress.subtract(this.imageBase)));
+		}
 		this.locateProtocol.put(String.valueOf(pCodeOffset), protocol);
 	}
 
