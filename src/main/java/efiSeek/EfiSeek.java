@@ -69,10 +69,28 @@ public class EfiSeek extends EfiUtils {
 	private JSONObject childSmi = new JSONObject();
 	private JSONObject swSmi = new JSONObject();
 	private JSONObject hwSmi = new JSONObject();
+	private JSONObject calloutRootMeta = new JSONObject();
+	private JSONObject smmCallouts = new JSONObject();
 
 	private HashMap<String, Address> smiHandlers = new HashMap<>();
+	private LinkedHashMap<String, CalloutRoot> calloutRoots = new LinkedHashMap<String, CalloutRoot>();
 	private ArrayList<Function> excFunctions = new ArrayList<Function>();
-	private ArrayList<Address> calloutAddresses = new ArrayList<Address>();
+	private LinkedHashSet<Address> calloutAddresses = new LinkedHashSet<Address>();
+	private LinkedHashSet<Address> protocolCalloutAddresses = new LinkedHashSet<Address>();
+	private LinkedHashSet<Address> smstAddresses = new LinkedHashSet<Address>();
+	private boolean hasSmmEvidence = false;
+
+	private static class CalloutRoot {
+		private final String kind;
+		private final String name;
+		private final Address address;
+
+		private CalloutRoot(String kind, String name, Address address) {
+			this.kind = kind;
+			this.name = name;
+			this.address = address;
+		}
+	}
 
 	// getVariableMap stores function and Pcode CALL op corresponding to GetVariable.
 	private HashMap<HighFunction, ArrayList<PcodeOpAST>> getVariableMap = new HashMap<>();
@@ -240,12 +258,15 @@ public class EfiSeek extends EfiUtils {
 		if(pCode == null) {
 			return;
 		}
+		this.hasSmmEvidence = true;
 		
 		this.varnodeConverter.newVarnode(pCode.getInput(2));
 
 		DataType smstType = this.uefiHeadersArchive.getDataType("/behemot.h/EFI_SMM_SYSTEM_TABLE2 *");
 		if (varnodeConverter.isGlobal()) {
-			this.defineData(varnodeConverter.getGlobalAddress(), smstType, "gSmst" + this.nameCount, null);
+			Address smstAddress = varnodeConverter.getGlobalAddress();
+			this.smstAddresses.add(smstAddress);
+			this.defineData(smstAddress, smstType, "gSmst" + this.nameCount, null);
 		} else if (varnodeConverter.isLocal()) {
 			this.defineVar(varnodeConverter.getVariable(), smstType, "Smst" + this.nameCount);
 			this.nameCount++;
@@ -256,6 +277,155 @@ public class EfiSeek extends EfiUtils {
 	private String guidNameToProtocolName(String name) {
 		String protName = name.substring(0, name.length() - 5);
 		return protName;
+	}
+
+	private boolean isSmmProtocolName(String name) {
+		String upperName = name.toUpperCase(Locale.ROOT);
+		return upperName.contains("_SMM_") || upperName.startsWith("EFI_SMM_")
+				|| upperName.contains("_MM_") || upperName.startsWith("EFI_MM_");
+	}
+
+	private boolean isPotentialCalloutProtocol(String name) {
+		String upperName = name.toUpperCase(Locale.ROOT);
+		return upperName.endsWith("_PROTOCOL") && !upperName.contains("_SMM_")
+				&& !upperName.startsWith("EFI_SMM_") && !upperName.contains("_MM_")
+				&& !upperName.startsWith("EFI_MM_");
+	}
+
+	private boolean isSmstDerivedCallTarget(Varnode varnode) {
+		this.varnodeConverter.newVarnode(varnode);
+		if (!this.varnodeConverter.isGlobal()) {
+			return false;
+		}
+		Address address = this.varnodeConverter.getGlobalAddress();
+		if (this.smstAddresses.contains(address)) {
+			return true;
+		}
+		for (Address smstAddress : this.smstAddresses) {
+			long offset = address.subtract(smstAddress);
+			if (offset >= 0 && offset < 0x200) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void addCalloutRoot(String kind, String name, Address address, Address sourceAddress) {
+		if (address == null || !mem.contains(address)) {
+			return;
+		}
+
+		String key = kind + ":" + name + ":" + address.toString();
+		if (this.calloutRoots.containsKey(key)) {
+			return;
+		}
+
+		this.calloutRoots.put(key, new CalloutRoot(kind, name, address));
+
+		JSONObject root = new JSONObject();
+		root.put("kind", kind);
+		root.put("name", name);
+		root.put("function offset", String.valueOf(address.subtract(this.imageBase)));
+		if (sourceAddress != null && mem.contains(sourceAddress)) {
+			root.put("source offset", String.valueOf(sourceAddress.subtract(this.imageBase)));
+		}
+		this.calloutRootMeta.put(key, root);
+	}
+
+	private int getPointerSize() {
+		return this.currentProgram.getDefaultPointerSize();
+	}
+
+	private Address normalizePointerValue(long value) {
+		Address absoluteAddress = toAddr(value);
+		if (mem.contains(absoluteAddress)) {
+			return absoluteAddress;
+		}
+
+		long maxRva = mem.getMaxAddress().subtract(this.imageBase);
+		if (value >= 0 && value <= maxRva) {
+			Address rvaAddress = this.imageBase.add(value);
+			if (mem.contains(rvaAddress)) {
+				return rvaAddress;
+			}
+		}
+		return absoluteAddress;
+	}
+
+	private Address readPointer(Address addr) throws MemoryAccessException {
+		int pointerSize = getPointerSize();
+		if (addr == null || !mem.contains(addr) || !mem.contains(addr.add(pointerSize - 1))) {
+			return null;
+		}
+
+		long value = 0;
+		for (int i = 0; i < pointerSize; i++) {
+			value |= (getByte(addr.add(i)) & 0xffL) << (8 * i);
+		}
+		return normalizePointerValue(value);
+	}
+
+	private boolean isExecutableAddress(Address address) {
+		if (address == null || !mem.contains(address)) {
+			return false;
+		}
+		MemoryBlock block = mem.getBlock(address);
+		return block != null && block.isExecute();
+	}
+
+	private boolean isCodeAddress(Address address) {
+		if (!isExecutableAddress(address)) {
+			return false;
+		}
+		return getFunctionContaining(address) != null || getInstructionAt(address) != null;
+	}
+
+	private Address resolveFunctionAddress(Varnode varnode) throws MemoryAccessException {
+		Address funcAddress = null;
+		this.varnodeConverter.newVarnode(varnode);
+
+		if (varnodeConverter.isGlobal()) {
+			funcAddress = varnodeConverter.getGlobalAddress();
+			if (varnodeConverter.isRef()) {
+				funcAddress = readPointer(varnodeConverter.getGlobalAddress());
+			}
+		} else if (varnode.isConstant()) {
+			funcAddress = normalizePointerValue(varnode.getOffset());
+		}
+
+		if (!isCodeAddress(funcAddress)) {
+			return null;
+		}
+		return funcAddress;
+	}
+
+	private void addSmmProtocolMethodRoots(Address interfaceAddress, String interfaceName, Address sourceAddress) throws MemoryAccessException {
+		if (interfaceAddress == null || !mem.contains(interfaceAddress)) {
+			return;
+		}
+
+		int pointerSize = getPointerSize();
+		int consecutiveNonCodePointers = 0;
+		boolean foundCodePointer = false;
+		for (long offset = 0; offset < 0x100; offset += pointerSize) {
+			Address slotAddress = interfaceAddress.add(offset);
+			if (!mem.contains(slotAddress) || !mem.contains(slotAddress.add(pointerSize - 1))) {
+				break;
+			}
+
+			Address methodAddress = readPointer(slotAddress);
+			if (isCodeAddress(methodAddress)) {
+				foundCodePointer = true;
+				String rootName = interfaceName + "_method_" + Long.toHexString(offset);
+				addCalloutRoot("SMM_PROTOCOL_METHOD", rootName, methodAddress, sourceAddress);
+				consecutiveNonCodePointers = 0;
+			} else {
+				consecutiveNonCodePointers++;
+				if (foundCodePointer && consecutiveNonCodePointers >= 2) {
+					break;
+				}
+			}
+		}
 	}
 	
 	private void locateProtocol(PcodeOpAST pCode) throws Exception {
@@ -283,11 +453,19 @@ public class EfiSeek extends EfiUtils {
 			interfaceType = this.uefiHeadersArchive.getDataType("/behemot.h/INT64 *");
 		if (interfaceName == null)
 			interfaceName = "unknownProtocol_" + guid.toString().substring(0, 8);
+		if (isSmmProtocolName(interfaceName)) {
+			this.hasSmmEvidence = true;
+		}
 
 		this.varnodeConverter.newVarnode(pCode.getInput(3));
+		Address protocolAddress = null;
 		if (varnodeConverter.isGlobal()) {
-			this.defineData(varnodeConverter.getGlobalAddress(), interfaceType, "g" + interfaceName + "_" + this.nameCount,
+			protocolAddress = varnodeConverter.getGlobalAddress();
+			this.defineData(protocolAddress, interfaceType, "g" + interfaceName + "_" + this.nameCount,
 					null);
+			if (isPotentialCalloutProtocol(interfaceName)) {
+				this.protocolCalloutAddresses.add(protocolAddress);
+			}
 			this.nameCount++;
 		} else if (varnodeConverter.isLocal()) {
 			this.defineVar(varnodeConverter.getVariable(), interfaceType, interfaceName + this.nameCount);
@@ -337,30 +515,47 @@ public class EfiSeek extends EfiUtils {
 			interfaceType = this.uefiHeadersArchive.getDataType("/behemot.h/INT64 *");
 		if (interfaceName == null)
 			interfaceName = "unknownProtocol_" + strGuid.substring(0, 8);
+		if (isSmmProtocolName(interfaceName)) {
+			this.hasSmmEvidence = true;
+		}
 		
+		Address interfaceAddress = null;
 		this.varnodeConverter.newVarnode(pCode.getInput(4));
 		
-			if (varnodeConverter.isGlobal()) {
-				interfaceType = this.uefiHeadersArchive.getDataType(
-						"/behemot.h/" + interfaceName);
-				if (interfaceType == null) {
-					interfaceType = this.uefiHeadersArchive.getDataType("/behemot.h/INT64");
-				}
-				this.defineData(varnodeConverter.getGlobalAddress(), interfaceType, "g" + interfaceName + "_" + this.nameCount,
-						null);
-				this.nameCount++;
-			} else if (varnodeConverter.isLocal()) {
-				this.defineVar(varnodeConverter.getVariable(), interfaceType, interfaceName + this.nameCount);
-				this.nameCount++;
+		if (varnodeConverter.isGlobal()) {
+			interfaceAddress = varnodeConverter.getGlobalAddress();
+			interfaceType = this.uefiHeadersArchive.getDataType(
+					"/behemot.h/" + interfaceName);
+			if (interfaceType == null) {
+				interfaceType = this.uefiHeadersArchive.getDataType("/behemot.h/INT64");
 			}
+			this.defineData(interfaceAddress, interfaceType, "g" + interfaceName + "_" + this.nameCount,
+					null);
+			this.nameCount++;
+		} else if (varnodeConverter.isLocal()) {
+			this.defineVar(varnodeConverter.getVariable(), interfaceType, interfaceName + this.nameCount);
+			this.nameCount++;
+		} else if (pCode.getInput(4).isConstant()) {
+			Address address = normalizePointerValue(pCode.getInput(4).getOffset());
+			if (mem.contains(address)) {
+				interfaceAddress = address;
+			}
+		}
 		
 		Address pCodeAddress = pCode.getSeqnum().getTarget();
 		long pCodeOffset = pCodeAddress.subtract(this.imageBase);
+
+		if (isSmstDerivedCallTarget(pCode.getInput(0)) && interfaceAddress != null) {
+			addSmmProtocolMethodRoots(interfaceAddress, interfaceName, pCodeAddress);
+		}
 
 		JSONObject protocol = new JSONObject();
 		protocol.put("name", interfaceName);
 		protocol.put("function name", this.getFunctionBefore(pCodeAddress).getName());
 		protocol.put("guid", strGuid);
+		if (interfaceAddress != null) {
+			protocol.put("interface offset", String.valueOf(interfaceAddress.subtract(this.imageBase)));
+		}
 		this.installProtocol.put(String.valueOf(pCodeOffset), protocol);
 	}
 
@@ -372,7 +567,6 @@ public class EfiSeek extends EfiUtils {
 		String funcName = null;
 		String fdefName = null;	
 		Address funcAddress = null;
-		Boolean isSwSmiHandler = false;
 		
 		
 		switch (pCode.getInput(0).getHigh().getDataType().getName()) {
@@ -388,7 +582,6 @@ public class EfiSeek extends EfiUtils {
 			funcName = "swSmiHandler";
 			root = this.swSmi;
 			fdefName = "EFI_SMM_SW_REGISTER2";
-			isSwSmiHandler = true;
 			break;
 		case ("EFI_SMM_PERIODIC_TIMER_REGISTER2"):
 			funcName = "periodicTimerHandler";
@@ -422,23 +615,21 @@ public class EfiSeek extends EfiUtils {
 			return;
 		}		
 		
-		this.varnodeConverter.newVarnode(pCode.getInput(2));
-		
-		if (varnodeConverter.isGlobal()) {
-			funcAddress = varnodeConverter.getGlobalAddress();
-			if (varnodeConverter.isRef()) {
-				funcAddress = readAddr(varnodeConverter.getGlobalAddress());
-			}
+		this.hasSmmEvidence = true;
+		funcAddress = resolveFunctionAddress(pCode.getInput(2));
+
+		if (funcAddress != null) {
 			funcName = funcName + this.nameCount;
 			this.createFunctionFormDifinition(funcAddress, funcProt, funcName);
 			this.nameCount++;
-			if (isSwSmiHandler) {
-				smiHandlers.put(funcName, funcAddress);
-			}
+			smiHandlers.put(funcName, funcAddress);
 		}
 		
 		Address pCodeAddress = pCode.getSeqnum().getTarget();
 		long pCodeOffset = pCodeAddress.subtract(this.imageBase);
+		if (funcAddress != null) {
+			addCalloutRoot("SMI_HANDLER", funcName, funcAddress, pCodeAddress);
+		}
 
 		JSONObject iter = new JSONObject();
 		if(funcAddress !=null) {
@@ -460,19 +651,20 @@ public class EfiSeek extends EfiUtils {
 			return;
 		}
 		
-		this.varnodeConverter.newVarnode(pCode.getInput(1));
+		this.hasSmmEvidence = true;
 
 		FunctionDefinition funcProt = (FunctionDefinition) this.uefiHeadersArchive
 				.getDataType("/behemot.h/functions/EFI_SMM_HANDLER_ENTRY_POINT2");
-		Address funcAddress = null;
+		Address funcAddress = resolveFunctionAddress(pCode.getInput(1));
 		String funcName = "";
 		
-		if (varnodeConverter.isGlobal()) {
+		if (funcAddress != null) {
 			funcName = "ChildSmiHandler" + this.nameCount;
-			funcAddress = varnodeConverter.getGlobalAddress();
 			this.createFunctionFormDifinition(funcAddress, funcProt,
 					funcName);
 			this.nameCount++;
+			smiHandlers.put(funcName, funcAddress);
+			addCalloutRoot("CHILD_SMI_HANDLER", funcName, funcAddress, pCode.getSeqnum().getTarget());
 		}
 		String strGuid = "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF";
 		Guid guid = this.defineGuid(pCode.getInput(2));
@@ -514,12 +706,15 @@ public class EfiSeek extends EfiUtils {
 			strGuid = guid.toString();
 			Msg.info(this, strGuid);
 		}
-		this.varnodeConverter.newVarnode(pCode.getInput(2));
+		this.hasSmmEvidence = true;
+		Address notifyAddress = resolveFunctionAddress(pCode.getInput(2));
+		String notifyName = "notify_" + strGuid.substring(0, 8);
 
-		if (varnodeConverter.isGlobal()) {
-			this.createFunctionFormDifinition(varnodeConverter.getGlobalAddress(),
+		if (notifyAddress != null) {
+			this.createFunctionFormDifinition(notifyAddress,
 					(FunctionDefinition) this.uefiHeadersArchive.getDataType("/behemot.h/functions/EFI_SMM_NOTIFY_FN"),
-					"notify_" + strGuid.substring(0, 8));
+					notifyName);
+			addCalloutRoot("SMM_NOTIFY", notifyName, notifyAddress, pCode.getSeqnum().getTarget());
 		}
 
 	}
@@ -773,16 +968,63 @@ public class EfiSeek extends EfiUtils {
 		return guid;
 	}
 	
+	private boolean isCalloutGlobalAddress(Address address) {
+		if (address == null || this.funcParamForwarding == null) {
+			return false;
+		}
+		return funcParamForwarding.getgBSAddresses().contains(address)
+				|| funcParamForwarding.getgRSAddresses().contains(address)
+				|| protocolCalloutAddresses.contains(address);
+	}
+
+	private String getCalloutTargetName(Address address) {
+		if (this.funcParamForwarding != null) {
+			if (funcParamForwarding.getgBSAddresses().contains(address)) {
+				return "EFI_BOOT_SERVICES";
+			}
+			if (funcParamForwarding.getgRSAddresses().contains(address)) {
+				return "EFI_RUNTIME_SERVICES";
+			}
+		}
+		if (protocolCalloutAddresses.contains(address)) {
+			String label = getLabel(address);
+			if (label != null) {
+				return label;
+			}
+			return "PROTOCOL_INTERFACE";
+		}
+		return "UNKNOWN";
+	}
+
+	private void recordCallout(Address instAddress, Function func, Address targetAddress) {
+		if (!calloutAddresses.add(instAddress)) {
+			return;
+		}
+
+		JSONObject callout = new JSONObject();
+		callout.put("function name", func.getName());
+		callout.put("function offset", String.valueOf(func.getEntryPoint().subtract(this.imageBase)));
+		callout.put("target", getCalloutTargetName(targetAddress));
+		if (targetAddress != null && mem.contains(targetAddress)) {
+			callout.put("target offset", String.valueOf(targetAddress.subtract(this.imageBase)));
+		}
+		this.smmCallouts.put(String.valueOf(instAddress.subtract(this.imageBase)), callout);
+	}
+
 	private void findCalloutRec(Function func) throws Exception {
+		if (excFunctions.contains(func)) {
+			return;
+		}
+		excFunctions.add(func);
+
 		for (Instruction inst = getFirstInstruction(func); inst != null && getFunctionContaining(inst.getAddress()) == func; inst = getInstructionAfter(inst)) {
 			PcodeOp pCodeOps[] = inst.getPcode();
 			for (PcodeOp pCode : pCodeOps) {
 				if (pCode.getOpcode() == PcodeOp.CALL) {
 					Address nextFuncAddr = pCode.getInput(0).getAddress();
 					Function nextFunc = getFunctionContaining(nextFuncAddr);
-					if (nextFunc != null && excFunctions.contains(nextFunc)) {
+					if (nextFunc != null) {
 						// Msg.debug(this, "Found exc function: " + nextFunc.getName());
-						excFunctions.add(nextFunc);
 						findCalloutRec(nextFunc);
 					}
 				}
@@ -792,14 +1034,12 @@ public class EfiSeek extends EfiUtils {
 				if (pCode.getOpcode() == PcodeOp.COPY) {
 					Varnode input0 = pCode.getInput(0);
 					Varnode output = pCode.getOutput();
-					if (input0.isAddress()
-					&& (funcParamForwarding.getgBSAddresses().contains(input0.getAddress())
-						|| funcParamForwarding.getgRSAddresses().contains(input0.getAddress()))
-					&& output.isRegister()) {
+					if (input0.isAddress() && isCalloutGlobalAddress(input0.getAddress())
+							&& output.isRegister()) {
 						Msg.warn(this, "Potential SMM callout detected at "
 						+ func.getName() + "(" + func.getEntryPoint().toString() + ")"
 						+ " : " + inst.getAddress().toString());
-						calloutAddresses.add(inst.getAddress());
+						recordCallout(inst.getAddress(), func, input0.getAddress());
 					}
 				}
 			}
@@ -809,13 +1049,14 @@ public class EfiSeek extends EfiUtils {
 	public void findSmmCallout() throws Exception {
 		Msg.info(this, "Searching for SMM callouts");
 
-		for (Map.Entry<String, Address> entry : smiHandlers.entrySet()) {
-			Msg.debug(this, "Searching for SMM callouts in '" + entry.getKey() + "'");
-			Function func = getFunctionContaining(entry.getValue());
+		for (Map.Entry<String, CalloutRoot> entry : calloutRoots.entrySet()) {
+			CalloutRoot root = entry.getValue();
+			Msg.debug(this, "Searching for SMM callouts in " + root.name + " (" + root.kind + ")");
+			Function func = getFunctionContaining(root.address);
 			if (func == null) {
-				func = createFunction(entry.getValue(), entry.getKey());
+				func = createFunction(root.address, root.name);
 				if (func == null) {
-					Msg.error(this, "Failed to create function for '" + entry.getKey() + "'");
+					Msg.error(this, "Failed to create function for " + root.name);
 					continue;
 				}
 			}
@@ -825,6 +1066,9 @@ public class EfiSeek extends EfiUtils {
 		for (Address addr : calloutAddresses) {
 			setPlateComment(addr, "Potential SMM callout");
 		}
+		this.createMeta();
+		if (this.currentProgram.isLocked() == false)
+			saveMeta();
 	}
 
 	public void annotateGetVariableOverflow() throws Exception {
@@ -949,7 +1193,6 @@ public class EfiSeek extends EfiUtils {
 
 	private void createMeta() {
 		 this.meta.put("locate protocol", this.locateProtocol);
-		 this.meta.put("locate protocol", this.locateProtocol);
 		 this.meta.put("install protocol", this.installProtocol);
 		 
 		 this.interrupts.put("child", this.childSmi);
@@ -957,6 +1200,8 @@ public class EfiSeek extends EfiUtils {
 		 this.interrupts.put("hwSmi", this.hwSmi);
 		 
 		 this.meta.put("interrupts", this.interrupts);
+		 this.meta.put("callout roots", this.calloutRootMeta);
+		 this.meta.put("smm callouts", this.smmCallouts);
 	}
 	
 	private void getMeta() {
@@ -972,12 +1217,30 @@ public class EfiSeek extends EfiUtils {
 			}
 			String metaStr = new String(raw);
 			this.meta = new JSONObject(metaStr);
-			this.locateProtocol = meta.getJSONObject("locate protocol");
-			this.installProtocol = meta.getJSONObject("install protocol");
-			this.interrupts = meta.getJSONObject("interrupts");
-			this.childSmi = interrupts.getJSONObject("child");
-			this.swSmi = interrupts.getJSONObject("swSmi");
-			this.hwSmi = interrupts.getJSONObject("hwSmi");
+			this.locateProtocol = meta.optJSONObject("locate protocol");
+			if (this.locateProtocol == null)
+				this.locateProtocol = new JSONObject();
+			this.installProtocol = meta.optJSONObject("install protocol");
+			if (this.installProtocol == null)
+				this.installProtocol = new JSONObject();
+			this.interrupts = meta.optJSONObject("interrupts");
+			if (this.interrupts == null)
+				this.interrupts = new JSONObject();
+			this.childSmi = interrupts.optJSONObject("child");
+			if (this.childSmi == null)
+				this.childSmi = new JSONObject();
+			this.swSmi = interrupts.optJSONObject("swSmi");
+			if (this.swSmi == null)
+				this.swSmi = new JSONObject();
+			this.hwSmi = interrupts.optJSONObject("hwSmi");
+			if (this.hwSmi == null)
+				this.hwSmi = new JSONObject();
+			this.calloutRootMeta = meta.optJSONObject("callout roots");
+			if (this.calloutRootMeta == null)
+				this.calloutRootMeta = new JSONObject();
+			this.smmCallouts = meta.optJSONObject("smm callouts");
+			if (this.smmCallouts == null)
+				this.smmCallouts = new JSONObject();
 		}
 	}
 	
