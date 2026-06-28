@@ -8,3 +8,8 @@ dist/
 lib/
 .idea/
 data/edk2*
+
+# Local firmware corpora and extraction outputs
+roms/
+extracted/
+samples/
